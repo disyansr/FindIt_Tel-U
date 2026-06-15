@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "481325909049",
+    "project_id": "findit-telu",
+    "storage_bucket": "findit-telu.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:481325909049:android:8b2b4e7296d5075c6479e8",
+        "android_client_info": {
+          "package_name": "com.example.findit_telu"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBkUIm9uCsBn-4Bp53nZdNRXdv_z8YqdS4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
