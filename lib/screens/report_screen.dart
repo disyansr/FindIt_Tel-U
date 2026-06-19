@@ -1,10 +1,12 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
 import '../models/item_model.dart';
 import '../viewmodels/item_viewmodel.dart';
 
@@ -25,6 +27,10 @@ class _ReportScreenState extends State<ReportScreen> {
   String _selectedStatus = 'Hilang';
   XFile? _pickedImage;
   bool _isSubmitting = false;
+  bool _isUploading = false;
+
+  final String _cloudName = 'dfvavwvta';
+  final String _uploadPreset = 'findit_telu';
 
   @override
   void dispose() {
@@ -51,8 +57,49 @@ class _ReportScreenState extends State<ReportScreen> {
   }
 
   Future<void> _pickImage() async {
-    final image = await ImagePicker().pickImage(source: ImageSource.gallery);
+    final image = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 70,
+    );
     if (image != null) setState(() => _pickedImage = image);
+  }
+
+  Future<String?> _uploadToCloudinary() async {
+    if (_pickedImage == null) return null;
+
+    setState(() => _isUploading = true);
+
+    try {
+      final url = Uri.parse(
+          'https://api.cloudinary.com/v1_1/$_cloudName/image/upload');
+
+      final request = http.MultipartRequest('POST', url);
+      request.fields['upload_preset'] = _uploadPreset;
+
+      if (kIsWeb) {
+        final bytes = await _pickedImage!.readAsBytes();
+        request.files.add(http.MultipartFile.fromBytes(
+          'file',
+          bytes,
+          filename: _pickedImage!.name,
+        ));
+      } else {
+        request.files.add(await http.MultipartFile.fromPath(
+          'file',
+          _pickedImage!.path,
+        ));
+      }
+
+      final response = await request.send();
+      final responseData = await response.stream.toBytes();
+      final jsonData = jsonDecode(String.fromCharCodes(responseData));
+
+      return jsonData['secure_url'];
+    } catch (e) {
+      return null;
+    } finally {
+      setState(() => _isUploading = false);
+    }
   }
 
   Future<void> _submitReport() async {
@@ -68,7 +115,28 @@ class _ReportScreenState extends State<ReportScreen> {
 
     setState(() => _isSubmitting = true);
 
+    // Simpan reference sebelum async gap
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final itemViewModel = context.read<ItemViewModel>();
     final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    String imageUrl =
+        'https://images.unsplash.com/photo-1594322436404-5a0526db4d13?q=80&w=400';
+
+    if (_pickedImage != null) {
+      final uploadedUrl = await _uploadToCloudinary();
+      if (uploadedUrl != null) {
+        imageUrl = uploadedUrl;
+      } else {
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(
+            content: Text('Gagal upload foto, pakai foto default.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    }
+
     final newItem = ItemModel(
       title: _titleController.text,
       location: _locationController.text,
@@ -76,13 +144,11 @@ class _ReportScreenState extends State<ReportScreen> {
       status: _selectedStatus,
       date: _dateController.text,
       contact: _contactController.text,
-      imageUrl: _pickedImage != null
-          ? _pickedImage!.path
-          : 'https://images.unsplash.com/photo-1594322436404-5a0526db4d13?q=80&w=400',
+      imageUrl: imageUrl,
       reportedBy: uid,
     );
 
-    final success = await context.read<ItemViewModel>().addItem(newItem);
+    final success = await itemViewModel.addItem(newItem);
 
     if (!mounted) return;
     setState(() => _isSubmitting = false);
@@ -95,14 +161,14 @@ class _ReportScreenState extends State<ReportScreen> {
       _dateController.clear();
       setState(() => _pickedImage = null);
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      scaffoldMessenger.showSnackBar(
         const SnackBar(
           content: Text('Laporan berhasil dikirim!'),
           backgroundColor: Colors.green,
         ),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
+      scaffoldMessenger.showSnackBar(
         const SnackBar(
           content: Text('Gagal mengirim laporan. Coba lagi.'),
           backgroundColor: Colors.red,
@@ -129,7 +195,7 @@ class _ReportScreenState extends State<ReportScreen> {
                 style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
             GestureDetector(
-              onTap: _pickImage,
+              onTap: _isSubmitting ? null : _pickImage,
               child: Container(
                 width: double.infinity,
                 height: 180,
@@ -144,7 +210,9 @@ class _ReportScreenState extends State<ReportScreen> {
                         children: [
                           Icon(Icons.add_a_photo,
                               size: 40, color: Colors.grey),
-                          Text('Upload Foto'),
+                          SizedBox(height: 8),
+                          Text('Upload Foto',
+                              style: TextStyle(color: Colors.grey)),
                         ],
                       )
                     : ClipRRect(
@@ -161,9 +229,11 @@ class _ReportScreenState extends State<ReportScreen> {
             DropdownButtonFormField<String>(
               initialValue: _selectedStatus,
               items: ['Hilang', 'Ditemukan']
-                  .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                  .map((s) =>
+                      DropdownMenuItem(value: s, child: Text(s)))
                   .toList(),
-              onChanged: (val) => setState(() => _selectedStatus = val!),
+              onChanged: (val) =>
+                  setState(() => _selectedStatus = val!),
               decoration: const InputDecoration(
                   labelText: 'Status', border: OutlineInputBorder()),
             ),
@@ -171,7 +241,8 @@ class _ReportScreenState extends State<ReportScreen> {
             TextField(
               controller: _titleController,
               decoration: const InputDecoration(
-                  labelText: 'Nama Barang', border: OutlineInputBorder()),
+                  labelText: 'Nama Barang',
+                  border: OutlineInputBorder()),
             ),
             const SizedBox(height: 15),
             TextField(
@@ -213,17 +284,36 @@ class _ReportScreenState extends State<ReportScreen> {
               width: double.infinity,
               height: 50,
               child: ElevatedButton(
-                onPressed: _isSubmitting ? null : _submitReport,
+                onPressed: _isSubmitting || _isUploading
+                    ? null
+                    : _submitReport,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFB71C1C),
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10)),
                 ),
-                child: _isSubmitting
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text('KIRIM LAPORAN',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
+                child: _isUploading
+                    ? const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2),
+                          ),
+                          SizedBox(width: 10),
+                          Text('Mengupload foto...',
+                              style: TextStyle(color: Colors.white)),
+                        ],
+                      )
+                    : _isSubmitting
+                        ? const CircularProgressIndicator(
+                            color: Colors.white)
+                        : const Text('KIRIM LAPORAN',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold)),
               ),
             ),
           ],
